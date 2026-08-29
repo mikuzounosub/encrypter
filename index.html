@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Secure Text</title>
+
+<style>
+    * {
+        box-sizing: border-box;
+    }
+
+    body {
+        margin: 0;
+        font-family: Arial, "Noto Sans JP", sans-serif;
+        background: #111827;
+        color: white;
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .container {
+        width: min(900px, 94%);
+        background: #1f2937;
+        padding: 30px;
+        border-radius: 18px;
+        box-shadow: 0 15px 50px rgba(0,0,0,.4);
+    }
+
+    h1 {
+        text-align: center;
+        margin-top: 0;
+        margin-bottom: 8px;
+    }
+
+    .subtitle {
+        text-align: center;
+        color: #9ca3af;
+        margin-bottom: 25px;
+    }
+
+    textarea {
+        width: 100%;
+        height: 280px;
+        resize: vertical;
+        background: #111827;
+        color: white;
+        border: 1px solid #374151;
+        border-radius: 12px;
+        padding: 15px;
+        font-size: 16px;
+        outline: none;
+    }
+
+    textarea:focus {
+        border-color: #60a5fa;
+    }
+
+    input {
+        width: 100%;
+        padding: 14px;
+        margin-top: 15px;
+        background: #111827;
+        color: white;
+        border: 1px solid #374151;
+        border-radius: 10px;
+        font-size: 16px;
+        outline: none;
+    }
+
+    .buttons {
+        display: flex;
+        gap: 12px;
+        margin-top: 15px;
+    }
+
+    button {
+        flex: 1;
+        padding: 14px;
+        border: none;
+        border-radius: 10px;
+        font-size: 16px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: .2s;
+    }
+
+    button:hover {
+        transform: translateY(-2px);
+        opacity: .9;
+    }
+
+    .encrypt {
+        background: #2563eb;
+        color: white;
+    }
+
+    .decrypt {
+        background: #059669;
+        color: white;
+    }
+
+    .clear {
+        background: #374151;
+        color: white;
+    }
+
+    .status {
+        margin-top: 15px;
+        text-align: center;
+        min-height: 24px;
+        color: #9ca3af;
+    }
+
+    .info {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 10px;
+        background: #111827;
+        color: #9ca3af;
+        font-size: 13px;
+        line-height: 1.7;
+    }
+
+    @media (max-width: 600px) {
+        .buttons {
+            flex-direction: column;
+        }
+
+        .container {
+            padding: 20px;
+        }
+    }
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>🔐 Secure Text</h1>
+
+    <div class="subtitle">
+        AES-256-GCM 暗号化
+    </div>
+
+    <textarea id="text"
+        placeholder="ここに文章を入力してください"></textarea>
+
+    <input
+        id="password"
+        type="password"
+        placeholder="暗号化・復号に使用するパスワード">
+
+    <div class="buttons">
+
+        <button class="encrypt" onclick="encryptText()">
+            🔒 暗号化
+        </button>
+
+        <button class="decrypt" onclick="decryptText()">
+            🔓 復号
+        </button>
+
+        <button class="clear" onclick="clearText()">
+            🗑 クリア
+        </button>
+
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div class="info">
+        <strong>暗号方式</strong><br>
+        AES-256-GCM<br>
+        PBKDF2（SHA-256）による鍵導出<br>
+        文章はブラウザ内で処理され、外部サーバーには送信されません。
+    </div>
+
+</div>
+
+<script>
+
+const ITERATIONS = 600000;
+
+/* =========================
+   パスワード → AES鍵
+========================= */
+
+async function deriveKey(password, salt) {
+
+    const encoder = new TextEncoder();
+
+    const passwordKey = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(password),
+        {
+            name: "PBKDF2"
+        },
+        false,
+        ["deriveKey"]
+    );
+
+    return crypto.subtle.deriveKey(
+        {
+            name: "PBKDF2",
+            salt: salt,
+            iterations: ITERATIONS,
+            hash: "SHA-256"
+        },
+        passwordKey,
+        {
+            name: "AES-GCM",
+            length: 256
+        },
+        false,
+        ["encrypt", "decrypt"]
+    );
+}
+
+
+/* =========================
+   暗号化
+========================= */
+
+async function encryptText() {
+
+    const text = document.getElementById("text").value;
+    const password = document.getElementById("password").value;
+    const status = document.getElementById("status");
+
+    if (!text) {
+        status.textContent = "文章を入力してください。";
+        return;
+    }
+
+    if (!password) {
+        status.textContent = "パスワードを入力してください。";
+        return;
+    }
+
+    try {
+
+        status.textContent = "暗号化しています……";
+
+        const encoder = new TextEncoder();
+
+        // ランダムなソルト
+        const salt = crypto.getRandomValues(
+            new Uint8Array(16)
+        );
+
+        // ランダムなIV
+        const iv = crypto.getRandomValues(
+            new Uint8Array(12)
+        );
+
+        const key = await deriveKey(
+            password,
+            salt
+        );
+
+        const encrypted = await crypto.subtle.encrypt(
+            {
+                name: "AES-GCM",
+                iv: iv,
+                tagLength: 128
+            },
+            key,
+            encoder.encode(text)
+        );
+
+        /*
+         * 保存するデータ
+         *
+         * SALT + IV + 暗号文
+         */
+
+        const combined = new Uint8Array(
+            salt.length +
+            iv.length +
+            encrypted.byteLength
+        );
+
+        combined.set(salt, 0);
+
+        combined.set(
+            iv,
+            salt.length
+        );
+
+        combined.set(
+            new Uint8Array(encrypted),
+            salt.length + iv.length
+        );
+
+        const result = arrayBufferToBase64(combined);
+
+        document.getElementById("text").value = result;
+
+        status.textContent =
+            "✓ 暗号化しました。";
+
+    } catch (error) {
+
+        console.error(error);
+
+        status.textContent =
+            "暗号化に失敗しました。";
+    }
+}
+
+
+/* =========================
+   復号
+========================= */
+
+async function decryptText() {
+
+    const text = document.getElementById("text").value.trim();
+    const password = document.getElementById("password").value;
+    const status = document.getElementById("status");
+
+    if (!text) {
+        status.textContent = "暗号文を入力してください。";
+        return;
+    }
+
+    if (!password) {
+        status.textContent = "パスワードを入力してください。";
+        return;
+    }
+
+    try {
+
+        status.textContent = "復号しています……";
+
+        const data = base64ToUint8Array(text);
+
+        // 最低でも
+        // SALT 16 + IV 12 + 暗号文
+        if (data.length < 29) {
+            throw new Error("Invalid data");
+        }
+
+        const salt = data.slice(0, 16);
+
+        const iv = data.slice(16, 28);
+
+        const encrypted = data.slice(28);
+
+        const key = await deriveKey(
+            password,
+            salt
+        );
+
+        const decrypted =
+            await crypto.subtle.decrypt(
+                {
+                    name: "AES-GCM",
+                    iv: iv,
+                    tagLength: 128
+                },
+                key,
+                encrypted
+            );
+
+        const decoder = new TextDecoder();
+
+        const result =
+            decoder.decode(decrypted);
+
+        document.getElementById("text").value =
+            result;
+
+        status.textContent =
+            "✓ 復号しました。";
+
+    } catch (error) {
+
+        console.error(error);
+
+        status.textContent =
+            "✕ 復号できませんでした。パスワードまたは暗号文を確認してください。";
+    }
+}
+
+
+/* =========================
+   Base64変換
+========================= */
+
+function arrayBufferToBase64(buffer) {
+
+    let binary = "";
+
+    const bytes =
+        new Uint8Array(buffer);
+
+    const chunkSize = 0x8000;
+
+    for (
+        let i = 0;
+        i < bytes.length;
+        i += chunkSize
+    ) {
+
+        binary += String.fromCharCode(
+            ...bytes.subarray(
+                i,
+                Math.min(
+                    i + chunkSize,
+                    bytes.length
+                )
+            )
+        );
+    }
+
+    return btoa(binary);
+}
+
+
+function base64ToUint8Array(base64) {
+
+    const binary =
+        atob(base64);
+
+    const bytes =
+        new Uint8Array(
+            binary.length
+        );
+
+    for (
+        let i = 0;
+        i < binary.length;
+        i++
+    ) {
+
+        bytes[i] =
+            binary.charCodeAt(i);
+    }
+
+    return bytes;
+}
+
+
+/* =========================
+   クリア
+========================= */
+
+function clearText() {
+
+    document.getElementById("text").value = "";
+
+    document.getElementById("status").textContent = "";
+}
+
+</script>
+
+</body>
+</html>
